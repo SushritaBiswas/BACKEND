@@ -6,7 +6,7 @@ const qrSchema = new mongoose.Schema({
     ref: "User",
     required: true,
   },
-  link: {
+  link: {  
     type: String,
     required: true,
   },
