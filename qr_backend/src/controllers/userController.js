@@ -1,8 +1,78 @@
 const User = require("../models/userModel");
+const resetPass = require("../models/resetPassword");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
+const transporter = require("../service/nodeMailer");
+require("dotenv").config();
 
+//Forgot password
+const forgotPass = async (req, res) => {
+  const email = req.body.email;
 
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.json({ error: "User not found" });
+    }
+
+    const reset_token = Math.floor(Math.random() * 10000).toString();
+
+    await resetPass.deleteMany({ userId: user._id });
+
+    const newResetPass = new resetPass({
+      userId: user._id,
+      resetToken: reset_token,
+    });
+
+    await newResetPass.save();
+
+    // Sending welcome email
+    const mailOptions = {
+      from: process.env.SENDER_EMAIL,
+      to: email,
+      subject: "Reset your password",
+      html: `
+        <h1>Here is you reset code</h1>
+        <h1>${reset_token}</h1>
+      `,
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    res.json({ msg: "Reset code sent to your email" });
+  } catch (error) {
+    console.log(error);
+  }
+};
+
+//Reset password
+const resetPassFunc = async (req, res) => {
+  const { token } = req.params;
+  const password = req.body.password;
+  try {
+    const resetToken = await resetPass.findOne({ resetToken: token });
+
+    if (!resetToken) {
+      return res.json({ msg: "Invalid code" });
+    }
+
+    const hashedPass = await bcrypt.hash(password, 10);
+
+    await User.findByIdAndUpdate(resetToken.userId, {
+      password: hashedPass,
+    });
+
+    await resetPass.deleteOne({ _id: resetToken._id });
+
+    res.json({ msg: "Password has been successfully updated" });
+  } catch (error) {
+    console.log(error);
+    return res.json({ error: "Internal server error" });
+  }
+};
+
+//Loging in
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
@@ -28,6 +98,16 @@ const loginUser = async (req, res) => {
       { expiresIn: "1h" }
     );
 
+    // Sending welcome email
+    const mailOptions = {
+      from: process.env.SENDER_EMAIL,
+      to: email,
+      subject: `Welcome to QR Code Management System ${user.username}`,
+      text: `Welcome to our website. You have been successfully logged in using email id: ${email}`,
+    };
+
+    await transporter.sendMail(mailOptions);
+
     res.json({
       token,
       user: {
@@ -35,6 +115,7 @@ const loginUser = async (req, res) => {
         email: user.email,
         role: user.role,
       },
+      success: true,
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -42,6 +123,7 @@ const loginUser = async (req, res) => {
   }
 };
 
+//Creating users
 const createUser = async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
@@ -49,12 +131,6 @@ const createUser = async (req, res) => {
 
     if (!username || !email || !password || !role) {
       return res.status(400).json({ error: "All fields are required." });
-    }
-
-    if (requesterRole !== "admin") {
-      return res
-        .status(403)
-        .json({ error: "Only admins are allowed to create accounts." });
     }
 
     const existingUser = await User.findOne({ username });
@@ -96,6 +172,8 @@ const deleteUsers = async (req, res) => {
 };
 
 module.exports = {
+  forgotPass,
+  resetPassFunc,
   loginUser,
   createUser,
   getUsers,
